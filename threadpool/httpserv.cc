@@ -1,15 +1,35 @@
 #include"threadpool.h"
 #include"http_conn.h"
 #include<cassert>
+#include<sys/wait.h>
 
 #define MAX_FD 65536//主线程管理的最大连接数
 #define MAX_EVENT_NUMBER 10000//epoll监听的最大事件数
+#define MAXLINE 1024
 
 typedef void sighandler(int);
 typedef struct sockaddr SA;
 
 extern int addfd(int epollfd,int fd,bool one_shot);
 extern int removefd(int epollfd,int fd);
+
+char args[MAXLINE];
+char filename[MAXLINE];
+
+void server_dynamic(int fd)
+{
+    int cpid;
+    char* emptylist[]={NULL};
+    if((cpid=fork())==0)
+    {
+        setenv("QUERY_STRING",args,1);
+        close(STDOUT_FILENO);
+        dup(fd);
+        execve(filename,emptylist,environ);
+        exit(0);
+    }
+    waitpid(cpid,NULL,0);
+}
 
 void addsig(int sig,sighandler* handler,bool restart=true)
 {
@@ -120,9 +140,21 @@ int main(int argc,char** argv)
             }
             else if(events[i].events&EPOLLOUT)
             {
-                if(!users[sockfd].write())//根据写的结果决定是否关闭连接
+                if(users[sockfd].isstatic())
                 {
-                    users[sockfd].close_conn();
+                    if(!users[sockfd].write())//根据写的结果决定是否关闭连接
+                    {
+                        users[sockfd].close_conn();
+                    }
+                }
+                else
+                {
+                    users[sockfd].write();
+                    server_dynamic(sockfd);
+                    if(users[sockfd].linger())
+                    {
+                        users[sockfd].close_conn();
+                    }
                 }
             }
             else

@@ -21,6 +21,8 @@
 #include<sys/uio.h>
 #include"locker.h"
 
+extern char args[1024];
+extern char filename[1024];
 class http_conn
 {
 private:
@@ -31,11 +33,14 @@ public:
     static const int WRITE_BUFFER_SIZE=1024;
     enum METHOD {GET=0,POST,HEAD,PUT,DELETE,TRACE,OPTIONS,CONNECT,PATCH};
     enum CHECK_STATE {CHECK_STATE_REQUESTLINE=0,CHECK_STATE_HEADER,CHECK_STATE_CONTENT};//用于状态转移的状态变量
-    enum HTTP_CODE {NO_REQUEST,GET_REQUEST,BAD_REQUEST,NO_RESOURCE,FORBIDDEN_REQUEST,FILE_REQUEST,INTERNAL_ERROR,CLOSED_CONNECTION};
+    enum HTTP_CODE {NO_REQUEST,GET_REQUEST,BAD_REQUEST,NO_RESOURCE,FORBIDDEN_REQUEST,FILE_REQUEST,DYNAMIC_REQUEST,INTERNAL_ERROR,CLOSED_CONNECTION};
     enum LINE_STATUS {LINE_OK=0,LINE_BAD,LINE_OPEN};
     
     http_conn(){}
     ~http_conn(){}
+
+    bool isstatic(){return is_static;}
+    bool linger(){return m_linger;}
 
     void init(int sockfd,const sockaddr_in& addr);//初始化新的连接
     void close_conn(bool real_close=true);//用于关闭连接
@@ -90,6 +95,8 @@ private:
     char* m_host;
     int m_content_length;
     bool m_linger;//http是否保持长连接
+
+    bool is_static;
 
     char* m_file_address;//客户请求的文件被mmap到内存中的起始位置
     struct stat m_file_stat;//文件状态

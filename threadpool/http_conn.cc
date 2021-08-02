@@ -82,6 +82,8 @@ void http_conn::init()
     m_content_length=0;//message body length(int)
     m_host=0;//主机名, 由请求方在请求头部中确定
 
+    is_static=true;
+
     m_start_line=0;//行起始位置
     m_checked_idx=0;//当前检查的字符位置
     m_read_idx=0;//已读入数据的下一个位置
@@ -192,6 +194,10 @@ http_conn::HTTP_CODE http_conn::parse_request_line(char* text)
     if(!m_url||m_url[0]!='/')//若没有找到目录斜杠
     {
         return BAD_REQUEST;
+    }
+    if(strstr(m_url,"cgi-bin"))
+    {
+        is_static=false;
     }
     m_check_state= CHECK_STATE_HEADER;//开始分析请求头部
     return NO_REQUEST;//请求分析结束，需要继续读取
@@ -305,6 +311,16 @@ http_conn::HTTP_CODE http_conn::process_read()
 //根据请求的文件设置相应的映射mmap
 http_conn::HTTP_CODE http_conn::do_request()//seems to only support GET filedata
 {
+    char* ptr=strchr(m_url,'?');
+    if(ptr)
+    {
+        *ptr++='\0';
+        strcpy(args,ptr);
+    }
+    else
+    {
+        strcpy(args," ");
+    }
     strcpy(m_real_file,".");
     strcat(m_real_file,m_url);
     if(stat(m_real_file,&m_file_stat)<0)
@@ -319,11 +335,21 @@ http_conn::HTTP_CODE http_conn::do_request()//seems to only support GET filedata
     {
         return BAD_REQUEST;
     }
-
-    int fd=open(m_real_file,O_RDONLY);
-    m_file_address=(char*)mmap(0,m_file_stat.st_size,PROT_READ,MAP_PRIVATE,fd,0);//最后一个0为offset
-    close(fd);
-    return FILE_REQUEST;
+    if(is_static)
+    {
+        int fd=open(m_real_file,O_RDONLY);
+        m_file_address=(char*)mmap(0,m_file_stat.st_size,PROT_READ,MAP_PRIVATE,fd,0);//最后一个0为offset
+        close(fd);
+        return FILE_REQUEST;
+    }
+    else
+    {
+        strcpy(filename,m_real_file);
+        if(!(S_IXOTH&m_file_stat.st_mode))
+            return BAD_REQUEST;
+        return DYNAMIC_REQUEST;
+    }
+    
 }
 void http_conn::unmap()
 {
@@ -365,7 +391,7 @@ bool http_conn::write()
         if(bytes_to_send<=bytes_have_send)//有问题吧??????
         {
             unmap();
-            if(m_linger)
+            if(m_linger||!is_static)
             {
                 init();
                 modfd(m_epollfd,m_sockfd,EPOLLIN);
@@ -488,6 +514,12 @@ bool http_conn::process_write(HTTP_CODE ret)
                 m_iv_count=2;
                 return true;
             }
+            break;
+        }
+        case DYNAMIC_REQUEST:
+        {
+            add_status_line(200,ok_200_tiltle);
+            add_linger();
             break;
         }
         default:
